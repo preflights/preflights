@@ -116,32 +116,43 @@ class PreflightsApp:
         file_context = self._file_context.build(repo_path)
 
         # 4. Generate questions via LLM
-        llm_questions = self._llm.generate_questions(
+        llm_response = self._llm.generate_questions(
             intention=intention,
             heuristics_config=heuristics_config,
             context=None,
+            session_state=None,
         )
 
-        # 5. Create session
+        # 5. Create session with LLM tracking
         now = self._clock.now_unix()
         session_id = self._uid.generate_session_id()
+
+        # Check if this is a fallback (MockLLMAdapter with _is_fallback flag)
+        llm_fallback_occurred = getattr(self._llm, "_is_fallback", False)
+        llm_provider_used = getattr(self._llm, "provider", "mock")
+
         session = Session(
             id=session_id,
             repo_path=repo_path,
             intention=intention,
             created_at=now,
             expires_at=now + self.SESSION_TTL_SECONDS,
-            asked_questions=llm_questions,
+            asked_questions=llm_response.questions,
             answers={},
             core_questions_asked=(),
             all_answers={},
+            # LLM tracking fields
+            missing_info=llm_response.missing_info,
+            decision_hint=llm_response.decision_hint,
+            llm_provider_used=llm_provider_used,
+            llm_fallback_occurred=llm_fallback_occurred,
         )
         self._session.create(session)
 
         # 6. Return result
         return PreflightStartResult(
             session_id=session_id,
-            questions=llm_questions,
+            questions=llm_response.questions,
         )
 
     def continue_preflight(

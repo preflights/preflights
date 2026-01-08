@@ -28,12 +28,37 @@ if TYPE_CHECKING:
     from preflights.adapters.fake_filesystem import FakeFilesystemAdapter
     from preflights.adapters.fixed_clock import FixedClockProvider
     from preflights.adapters.in_memory_session import InMemorySessionAdapter
+    from preflights.application.ports.llm import LLMPort
     from preflights.adapters.mock_llm import MockLLMAdapter
     from preflights.adapters.sequential_uid import SequentialUIDProvider
     from preflights.adapters.simple_file_context import SimpleFileContextBuilder
 
 # Module-level default app (lazy initialized)
 _default_app: PreflightsApp | None = None
+_configured_llm_provider: str | None = None
+_configured_llm_strict: bool = False
+
+
+def configure_llm(
+    provider: str | None = None,
+    strict_mode: bool = False,
+) -> None:
+    """
+    Configure LLM provider for subsequent API calls.
+
+    This must be called BEFORE start_preflight() if you want to use
+    a real LLM provider instead of the default mock.
+
+    Args:
+        provider: LLM provider override (anthropic, openai, openrouter)
+        strict_mode: If True, fail on LLM errors instead of falling back to mock
+    """
+    global _default_app, _configured_llm_provider, _configured_llm_strict
+
+    _configured_llm_provider = provider
+    _configured_llm_strict = strict_mode
+    # Force recreation of app with new config
+    _default_app = None
 
 
 def _get_default_app() -> PreflightsApp:
@@ -49,9 +74,21 @@ def _get_default_app() -> PreflightsApp:
 
     global _default_app
     if _default_app is None:
+        # Create LLM adapter based on configuration
+        llm_adapter: LLMPort
+        if _configured_llm_provider:
+            from preflights.adapters.llm_factory import create_llm_adapter
+
+            llm_adapter = create_llm_adapter(
+                provider_override=_configured_llm_provider,
+                strict_mode=_configured_llm_strict,
+            )
+        else:
+            llm_adapter = MockLLMAdapter()
+
         _default_app = PreflightsApp(
             session_adapter=InMemorySessionAdapter(),
-            llm_adapter=MockLLMAdapter(),
+            llm_adapter=llm_adapter,
             filesystem_adapter=FakeFilesystemAdapter(),
             uid_provider=SequentialUIDProvider(),
             clock_provider=FixedClockProvider(),
@@ -59,6 +96,12 @@ def _get_default_app() -> PreflightsApp:
             config_loader=DefaultConfigLoader(),
         )
     return _default_app
+
+
+def get_llm_fallback_status() -> bool:
+    """Check if current LLM adapter is a fallback from real provider."""
+    app = _get_default_app()
+    return getattr(app._llm, "_is_fallback", False)
 
 
 def start_preflight(
@@ -192,4 +235,7 @@ __all__ = [
     # Factory for testing
     "create_app",
     "PreflightsApp",
+    # LLM configuration
+    "configure_llm",
+    "get_llm_fallback_status",
 ]

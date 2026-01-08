@@ -8,7 +8,10 @@ These types are FROZEN for V1 (see PREFLIGHTS_APP_CONTRACT.md).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    pass
 
 
 # =============================================================================
@@ -30,6 +33,49 @@ class Question:
     # Conditional visibility (for __other fields)
     depends_on_question_id: str | None = None
     depends_on_value: str | None = None
+
+
+# =============================================================================
+# LLM TYPES
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class LLMResponse:
+    """Structured response from LLM.
+
+    Contains questions and semantic tracking fields for cross-session state.
+    """
+
+    questions: tuple[Question, ...]
+    missing_info: tuple[str, ...]  # Semantic keys (1:1 with questions)
+    decision_hint: Literal["task", "adr", "unsure"]
+    progress: float  # 0.0 to 1.0
+
+
+@dataclass(frozen=True)
+class LLMContext:
+    """Filtered and redacted context sent to LLM.
+
+    Never contains raw workspace data, secrets, or PII.
+    """
+
+    file_summary: str  # High-level file structure (not raw paths)
+    technology_signals: tuple[tuple[str, str], ...]  # (signal_type, value)
+    architecture_summary: str | None  # Existing decisions summary
+
+
+@dataclass(frozen=True)
+class SessionSnapshot:
+    """Minimal session state for LLM context.
+
+    Used to provide session history to LLM for cross-session tracking.
+    """
+
+    intention: str
+    asked_questions: tuple[str, ...]  # Question IDs already asked
+    answered_questions: tuple[str, ...]  # Question IDs answered
+    missing_info: tuple[str, ...]  # Semantic keys still needed
 
 
 # =============================================================================
@@ -101,6 +147,13 @@ class AppErrorCode:
     REPO_NOT_FOUND = "REPO_NOT_FOUND"
     CONFIG_ERROR = "CONFIG_ERROR"
 
+    # LLM-specific error codes
+    LLM_TIMEOUT = "LLM_TIMEOUT"
+    LLM_INVALID_RESPONSE = "LLM_INVALID_RESPONSE"
+    LLM_PROVIDER_ERROR = "LLM_PROVIDER_ERROR"
+    LLM_CREDENTIALS_MISSING = "LLM_CREDENTIALS_MISSING"
+    LLM_RATE_LIMITED = "LLM_RATE_LIMITED"
+
 
 # =============================================================================
 # SESSION TYPES (internal)
@@ -128,6 +181,12 @@ class Session:
     # Decision patch (extracted by LLM)
     decision_patch_category: str | None = None
     decision_patch_fields: tuple[tuple[str, str], ...] | None = None
+
+    # LLM semantic tracking
+    missing_info: tuple[str, ...] = ()  # Semantic keys from LLM
+    decision_hint: str | None = None  # "task" | "adr" | "unsure" (informative only)
+    llm_provider_used: str | None = None  # Track which provider was used
+    llm_fallback_occurred: bool = False  # Track if fallback happened
 
     def is_expired(self, current_time: float) -> bool:
         """Check if session has expired."""

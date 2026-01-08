@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from preflights.application.types import Question
+from preflights.application.types import (
+    LLMContext,
+    LLMResponse,
+    Question,
+    SessionSnapshot,
+)
 from preflights.core.types import DecisionPatch, HeuristicsConfig
 
 
@@ -16,26 +21,31 @@ class LLMPort(Protocol):
     - Generating clarification questions from intention
     - Extracting structured DecisionPatch from answers
 
-    V1: Mock adapter with deterministic behavior.
-    Future: Anthropic Claude adapter.
+    Supports multiple implementations:
+    - MockLLMAdapter: Deterministic (default, fallback)
+    - AnthropicLLMAdapter: Claude via tool use
+    - OpenAILLMAdapter: GPT via function calling
+    - OpenRouterLLMAdapter: Multiple models via OpenRouter
     """
 
     def generate_questions(
         self,
         intention: str,
         heuristics_config: HeuristicsConfig,
-        context: str | None = None,
-    ) -> tuple[Question, ...]:
+        context: LLMContext | None = None,
+        session_state: SessionSnapshot | None = None,
+    ) -> LLMResponse:
         """
         Generate clarification questions based on intention.
 
         Args:
             intention: User's intention text
             heuristics_config: Schema and heuristics configuration
-            context: Optional additional context
+            context: Optional filtered and redacted context
+            session_state: Optional session snapshot for cross-session tracking
 
         Returns:
-            Tuple of questions to ask
+            LLMResponse with questions and semantic tracking fields
         """
         ...
 
@@ -60,3 +70,7 @@ class LLMPort(Protocol):
               Application should return PATCH_EXTRACTION_FAILED error.
         """
         ...
+
+
+# Legacy type alias for backward compatibility
+LegacyQuestionTuple = tuple[Question, ...]
