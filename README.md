@@ -12,12 +12,13 @@ It turns a vague intention into explicit decisions and a clear execution brief �
 Preflights sits before AI coding agents (Claude Code, Cursor, Windsurf).
 
 It does not generate code.
-It forces clarification, captures architectural decisions, and produces a clear execution brief so AI agents can implement without guessing.
+It forces clarification, captures architectural decisions, and produces a clear execution brief so AI agents can implement without guessing or redefining scope.
 
 Think of it as a pre-flight checklist for AI-assisted development.
 
 ---
-## How Preflights uses AI (and how it doesn’t)
+
+## How Preflights uses AI (and how it doesn't)
 
 Preflights may optionally use an LLM **only** to generate clarification questions and progress signals.
 
@@ -29,6 +30,11 @@ It never:
 
 All decisions, validations, and artifacts are produced by a deterministic core.
 The LLM is treated as an interchangeable clarification engine — not an authority.
+
+The deterministic MockLLMAdapter defines the reference behavior.
+LLM-backed modes must align with it.
+
+---
 
 ## Why Preflights exists
 
@@ -265,6 +271,26 @@ The Core never touches the filesystem or an LLM.
 
 ---
 
+## Design & Specifications
+
+Preflights is driven by explicit design specifications.
+
+This README provides a high-level overview.
+Detailed behavior, contracts, and invariants live in `docs/specs/`.
+
+These documents are the **source of truth** for:
+- core behavior and invariants
+- clarification flow
+- LLM interaction rules
+- generated artifacts (ADR, TASK, architecture state)
+
+If you plan to contribute or extend Preflights, start with:
+- `docs/specs/core-spec.md`
+- `docs/specs/mock-llm-spec.md`
+- `docs/specs/cli-spec.md`
+
+---
+
 ## When not to use Preflights
 
 You probably don't need Preflights if:
@@ -310,7 +336,7 @@ Core rules:
 - dataclasses are frozen
 - no Any types
 
-See `AGENTS.md` for agent-specific instructions.
+See `CONTRIBUTING.md` and `AGENTS.md` for contributor and agent-specific instructions.
 
 ---
 
