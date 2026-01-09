@@ -66,9 +66,9 @@ def _get_default_app() -> PreflightsApp:
     """Get or create default app instance."""
     # Import adapters lazily to avoid circular imports
     from preflights.adapters.default_config import DefaultConfigLoader
+    from preflights.adapters.file_session import FileSessionAdapter
     from preflights.adapters.filesystem import FilesystemAdapter
     from preflights.adapters.fixed_clock import FixedClockProvider
-    from preflights.adapters.in_memory_session import InMemorySessionAdapter
     from preflights.adapters.mock_llm import MockLLMAdapter
     from preflights.adapters.sequential_uid import SequentialUIDProvider
     from preflights.adapters.simple_file_context import SimpleFileContextBuilder
@@ -88,7 +88,7 @@ def _get_default_app() -> PreflightsApp:
             llm_adapter = MockLLMAdapter()
 
         _default_app = PreflightsApp(
-            session_adapter=InMemorySessionAdapter(),
+            session_adapter=FileSessionAdapter(),
             llm_adapter=llm_adapter,
             filesystem_adapter=FilesystemAdapter(),
             uid_provider=SequentialUIDProvider(),
