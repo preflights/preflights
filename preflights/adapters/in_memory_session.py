@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
+from preflights.application.ports.session import (
+    SessionAlreadyExistsError,
+    SessionNotFoundError,
+)
 from preflights.application.types import Session
 
-
-class SessionNotFoundError(Exception):
-    """Session not found."""
-
-    pass
-
-
-class SessionAlreadyExistsError(Exception):
-    """Session already exists."""
-
-    pass
+# Re-export for backward compatibility
+__all__ = [
+    "InMemorySessionAdapter",
+    "SessionAlreadyExistsError",
+    "SessionNotFoundError",
+]
 
 
 class InMemorySessionAdapter:

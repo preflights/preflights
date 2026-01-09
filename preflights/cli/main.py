@@ -60,6 +60,25 @@ if TYPE_CHECKING:
 SESSION_DURATION_MINUTES = 30
 
 
+def _lazy_cleanup_sessions() -> None:
+    """
+    Best-effort cleanup of expired sessions.
+
+    Called at the start of each CLI command to prevent accumulation.
+    Failures are silently ignored (non-blocking).
+    """
+    import time
+
+    try:
+        from preflights.adapters.file_session import FileSessionAdapter
+
+        adapter = FileSessionAdapter()
+        adapter.cleanup_expired(time.time())
+    except Exception:
+        # Best effort - don't block user if cleanup fails
+        pass
+
+
 def _questions_to_stored(questions: tuple[Any, ...]) -> list[StoredQuestion]:
     """Convert Application questions to stored questions."""
     result = []
@@ -265,6 +284,9 @@ def start(
         llm = True
 
     try:
+        # 0. Lazy cleanup of expired sessions (best effort)
+        _lazy_cleanup_sessions()
+
         # 1. Discover repository root
         repo_root = get_repo_root(repo_path)
 
@@ -378,6 +400,9 @@ def answer(
         pf answer auth_strategy=OAuth -i  # Continue interactively
     """
     try:
+        # 0. Lazy cleanup of expired sessions (best effort)
+        _lazy_cleanup_sessions()
+
         # 1. Discover repository root
         repo_root = get_repo_root(repo_path)
 
@@ -512,6 +537,9 @@ def answer(
 def status(repo_path: str | None, json_output: bool) -> None:
     """Display current session state."""
     try:
+        # 0. Lazy cleanup of expired sessions (best effort)
+        _lazy_cleanup_sessions()
+
         # 1. Discover repository root
         repo_root = get_repo_root(repo_path)
 
@@ -587,6 +615,9 @@ def resume(
         llm = True
 
     try:
+        # 0. Lazy cleanup of expired sessions (best effort)
+        _lazy_cleanup_sessions()
+
         # 1. Discover repository root
         repo_root = get_repo_root(repo_path)
 
@@ -670,6 +701,9 @@ def resume(
 def reset(force: bool, repo_path: str | None, json_output: bool) -> None:
     """Cancel current session and cleanup."""
     try:
+        # 0. Lazy cleanup of expired sessions (best effort)
+        _lazy_cleanup_sessions()
+
         # 1. Discover repository root
         repo_root = get_repo_root(repo_path)
 

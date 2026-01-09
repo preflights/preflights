@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from preflights.application.types import Session
+if TYPE_CHECKING:
+    from preflights.application.types import Session
+
+
+class SessionNotFoundError(Exception):
+    """Session not found."""
+
+    pass
+
+
+class SessionAlreadyExistsError(Exception):
+    """Session already exists."""
+
+    pass
 
 
 class SessionPort(Protocol):
