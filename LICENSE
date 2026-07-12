@@ -1,84 +1,43 @@
-@startuml
-!theme plain
-skinparam componentStyle uml2
+: Il n'y a pas un seul "ID de transaction", il y a une chaîne d'identifiants.
 
-' --- La magie du style "Dessiné à la main" ---
-skinparam handwritten true
+Dans Transact, l'identifiant change de forme selon la couche logicielle où vous vous trouvez (l'Initiation, le Moteur, ou la Comptabilité). Voici la carte d'identité exacte des clés primaires (les @ID ou RECID) pour chaque étape de votre flux.
 
-' Ajustement des espacements pour éviter les chevauchements
-skinparam nodesep 80
-skinparam ranksep 100
-skinparam defaultTextAlignment center
+1. La clé d'Initiation (Le déclencheur métier)
+C'est la clé primaire de l'application source. C'est l'ID que le conseiller voit sur son écran ou que l'API renvoie.
 
-title Architecture de facturation : Monde Natif (AA) vs Monde Historique (Shadow)
+Format : Un préfixe de 2 lettres (identifiant le module) + une date julienne (souvent YYDDD) + un numéro de séquence.
 
-' --- Définition des acteurs ---
-actor "Batch Nuit\n(COB)" as sys
-actor "Canaux / API" as api
-actor "Conseiller" as user
+Exemples :
 
-' --- 1. Origines des transactions ---
-package "Origines des Opérations (Déclencheurs)" {
-    component "Modules Historiques / Spécifiques\n(FT, DC, TT, ACR...)" as Legacy #E8F8F5
-    component "Opérations Natives AA\n(Facturation, Agios...)" as Natif #E8F8F5
-}
+FT2419512345 (Pour un FUNDS.TRANSFER)
 
-' --- 2. Cœur de tarification ---
-package "Core Banking : Architecture Arrangement (AA)" #F9EBEA {
-    component "Activité\n(AA.ACTIVITY)" as Activity #FFFFFF
-    component "Arrangement\n(Contrat Client)" as Arrangement #FFFFFF
-    component "Produit\n(Règles Tarifaires)" as Product #FFFFFF
-    database "Compte\n(ACCOUNT)" as Account #FFFFFF
-}
+PO2419598765 (Pour un Payment Order du Payment Hub)
 
-' --- 3. Réglementation et Comptabilité ---
-package "Exécution & Réglementation" {
-    component "FRMB\n(Écrêtement Murcef)" as FRMB #FCF3CF
-    
-    database "Ledger Comptable" #EAEDED {
-        component "STMT.ENTRY\n(Mouvement Client)" as STMT #FFFFFF
-        component "CATEG.ENTRY\n(P&L Banque)" as CATEG #FFFFFF
-    }
-}
+CHG241950001 (Pour une AC.CHARGE.REQUEST)
 
-' --- Routage des Acteurs ---
-sys ---> Natif : "Déclenche\n(Échéances)"
-api ---> Legacy : "Soumet\n(Virement FT)"
-user ---> Legacy : "Saisit\n(Frais ACR)"
+2. La clé d'Activité (Le moteur AA)
+C'est la clé primaire de la table AA.ARRANGEMENT.ACTIVITY. C'est le fameux événement d'exécution.
 
-' --- La dichotomie Shadow vs Natif ---
-' Utilisation de flèches plus longues pour laisser respirer le texte
-Legacy ...down...> Activity : "**Génère implicitement**\n(Shadow Activity)"
-Natif ---down---> Activity : "**Crée directement**\n(Événement Natif)"
+Format : Le préfixe AAA + la date julienne (YYDDD) + un numéro de séquence unique.
 
-' --- Mécanique AA ---
-Product -right-> Arrangement : "Instancie"
-Activity ---down---> Arrangement : "Sollicite le contrat"
+Exemple : AAA2419509876543
 
-' --- Contrôle et Comptabilisation ---
-Arrangement ---down---> FRMB : "Vérifie les plafonds\navant débit"
-FRMB ---down---> STMT : "Crée ligne comptable\n(Montant facturé)"
-FRMB ---right---> CATEG : "Crée contrepartie"
+Note métier : Si l'opération vient d'un virement (FT), Transact crée ce AAA en coulisse (le Shadow). Si c'est un prélèvement d'agios mensuel, la transaction naît directement sous la forme d'un AAA.
 
-STMT -left-> Account : "Met à jour\nle solde"
+3. La clé Comptable (Le Ledger)
+C'est la clé primaire de la table STMT.ENTRY. C'est la ligne comptable physique.
 
-' --- Notes explicatives ---
-note top of Legacy
-  Les anciens modules parlent leur 
-  propre langage. Le framework AA
-  génère une activité "fantôme" 
-  pour faire la traduction.
-end note
+Format : Une très longue séquence numérique pure (souvent l'ID de la transaction d'origine hachée ou séquentielle, suivie d'un suffixe pour indiquer le numéro de la patte comptable).
 
-note top of Natif
-  Aucune traduction nécessaire.
-  L'événement généré est 
-  directement une Activité AA.
-end note
+Exemple : 172948503928475.0001 (Le .0001 indique que c'est la première ligne générée par le mouvement).
 
-note bottom of STMT
-  Clé de jointure pour les Transactions: TRANS.REFERENCE
-  (commence par FT... ou AAA...)
-end note
+Le champ magique : TRANS.REFERENCE
+Pour que vous ne soyez pas perdu entre ces trois niveaux, Temenos utilise un champ "colle" dans la table STMT.ENTRY : le champ TRANS.REFERENCE.
 
-@enduml
+C'est ce champ-là que l'on appelle vulgairement "l'ID de la transaction" quand on fait de la Data.
+
+Voici ce que Transact inscrit dans le champ TRANS.REFERENCE du STMT.ENTRY :
+
+Si l'origine est un module historique (ex: Virement), il stocke l'ID d'origine : FT2419512345. (Il masque le AAA fantôme pour que le client final voie bien la référence du virement).
+
+Si l'origine est 100% native AA (ex: prélèvement de la carte bancaire), il stocke l'ID de l'activité : AAA2419509876543.
