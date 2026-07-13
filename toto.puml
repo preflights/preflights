@@ -1,0 +1,64 @@
+@startuml
+!theme plain
+skinparam componentStyle uml2
+skinparam handwritten true
+skinparam defaultTextAlignment center
+
+' Ajustement des espacements pour aérer le schéma
+skinparam nodesep 50
+skinparam ranksep 60
+
+title Architecture TSG : Traitement de TOUS les Frais (Immédiats & Différés)
+
+skinparam rectangle {
+    BackgroundColor #B0D4F1
+    BorderColor Black
+    RoundCorner 15
+}
+
+skinparam queue {
+    BackgroundColor White
+    BorderColor Black
+}
+
+' Définition des composants
+rectangle "Core Banking\n(Transact)" as CBS #E8F8F5
+rectangle "**TSG**\n(Stream Processor)" as TSG #B0D4F1
+
+' Définition des topics sources
+queue "cbs-booked\n(Flux STMT.ENTRY)" as cbs_booked
+queue "billing-details\n(Détails Factures AA)" as bill_details
+queue "frmb-audit\n(Détail Écrêtement)" as frmb
+
+' Définition des topics cibles
+queue "domain-transactions" as tx_topic
+queue "domain-fees" as fees_topic
+
+' --- Astuce d'alignement ---
+' Force billing-details à se placer à gauche de frmb pour éviter les croisements
+bill_details -[hidden]right-> frmb
+tx_topic -[hidden]right-> fees_topic
+
+' --- Flux d'ingestion ---
+CBS .right.> cbs_booked : "Écriture comptable\n(Le Réalisé)"
+' La flèche 'down' force le lien à descendre sur la gauche
+CBS ..down..> bill_details : "Détail factures\n(Si différé)"
+CBS ...> frmb : "Audit légal\n(Si incident)"
+
+' --- Traitement par TSG ---
+cbs_booked -down-> TSG : "Déclencheur principal"
+bill_details -up-> TSG : "[Si Différé]\nFournit le détail"
+frmb -up-> TSG : "[Si Incident]\nFournit les plafonds"
+
+' --- Distribution ---
+TSG -down-> tx_topic : "Transactions\nstandards"
+TSG -down-> fees_topic : "Tous les Frais\n(Immédiats & Différés)"
+
+note right of TSG
+  **Logique de routage TSG (Si code = Frais) :**
+  1. Immédiat Simple -> Mappe 1:1 vers domain-fees
+  2. Incident -> Jointure FRMB puis domain-fees
+  3. Différé -> Éclatement Billing (1:N) puis domain-fees
+end note
+
+@enduml
