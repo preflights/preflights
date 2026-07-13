@@ -1,0 +1,49 @@
+@startuml
+!theme plain
+skinparam componentStyle rectangle
+skinparam noteBackgroundColor #F9F9F9
+skinparam noteBorderColor #CCCCCC
+
+title Routage des Frais perçus et différés (Vue Intégration)
+
+cloud "Core Banking\n(Transact)" as core #E2EFDA
+
+queue "Objets stmt.entry & cat.entry \n(Flux Outbox brut)" as outbox #FCE4D6
+
+node "fees-extractor\n(Stream Processor)" as FE #BDD7EE
+
+database "billing-details\n(Détails Factures AA)" as billing #EDEDED
+database "frmb-audit\n(Plafonnements)" as audit #EDEDED
+
+queue "cbs-booked-fees" as booked_fees #FCE4D6
+queue "cbs-deferred-fees" as deferred_fees #FCE4D6
+'queue "domain-transactions" as domain_tx #FCE4D6
+queue "DLQ\n(Attente / Désynchro)" as dlq #F8CBAD
+
+note right of FE
+  **Logique de routage fees-extractor :**
+  1. Si Mouvement sur Compte Client (STMT.ENTRY) :
+     - Si CLASS = 'BILLS' -> Éclatement Billing (1:N) vers booked-fees
+     - Si Frais Immédiat d'Incident -> Jointure frmb-audit puis booked-fees
+     - Si autre Frais (Immédiat standard) -> Mappage 1:1 vers booked-fees
+  2. Si Mouvement sur Compte P&L/Interne (CAT.ENTRY / Suspense) :
+     - Concerne un Frais Différé (Mois N) -> Jointure frmb-audit (Écrêtement) -> Routage vers deferred-fees
+  3. Sinon (Opération standard) :
+     - / (Ignoré)
+  4. Si données manquantes (billing ou audit) :
+     - Routage vers DLQ (Attente)
+end note
+
+core -.-> outbox
+
+outbox --> FE : Déclencheur principal\n(Événement brut)
+
+FE <-left-> billing : "[Si Activité AA & BILLS]\nRecherche détails (1:N)"
+FE <-right-> audit : "[Si Incident]\nRecherche plafonds/écrêtement"
+
+FE --> booked_fees : "Frais perçus (Client débité)\n(Enrichis & Éclatés)"
+FE --> deferred_fees : "Frais à venir (Différés)\n(Information préalable)"
+'FE --> domain_tx : "Opérations\nstandards"
+FE -down-> dlq : "[Si données introuvables]\n(Désynchronisation)"
+
+@enduml
