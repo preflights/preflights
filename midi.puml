@@ -1,0 +1,77 @@
+@startuml
+skinparam style strictuml
+skinparam ActivityBackgroundColor #EEEEEE
+skinparam ActivityBorderColor #333333
+skinparam ActivityDiamondBackgroundColor #FFFFFF
+skinparam ActivityDiamondBorderColor #333333
+skinparam NoteBackgroundColor #F9F9F9
+
+title Algorithme de Constitution du Référentiel (Frais Perçus & Différés)
+
+start
+:Nouvel événement comptable brut\n(STMT.ENTRY ou CAT.ENTRY)\nissu du flux Outbox;
+
+if (Mouvement sur Compte Client\n(Prélèvement effectif / STMT.ENTRY) ?) then (Oui)
+  if (TRANS.REFERENCE commence par 'AAA' ?) then (Oui)
+    if (ACTIVITY.CLASS = 'BILLS' ?) then (Oui (Fin de mois / Différés))
+      :Recherche dans billing-details\n(via TRANS.REFERENCE globale);
+      if (Détails trouvés ?) then (Oui)
+        :Éclater le mouvement global\nen N événements détaillés;
+        
+        partition "Pour chaque ligne éclatée de la facture" {
+          if (Est-ce un Frais d'Incident (CMF) ?) then (Oui)
+            :Recherche dans frmb-audit\n(via référence d'origine de la ligne);
+            if (Audit trouvé ?) then (Oui)
+              #A9D08E:Enrichir avec l'écrêtement\n(status, cappedAmount...);
+              #9BC2E6:Publier message dans\n**cbs-booked-fees**;
+            else (Non)
+              #F4B084:Envoyer en DLQ (Attente)\n(Désynchronisation Kafka);
+              stop
+            endif
+          else (Non (Frais de gestion standard))
+            #9BC2E6:Publier message dans\n**cbs-booked-fees**;
+          endif
+        }
+        stop
+      else (Non)
+        #F4B084:Envoyer en DLQ (Attente);
+        stop
+      endif
+
+    else (Non (Frais unitaire / Immédiat))
+      if (Est-ce un Frais d'Incident ?) then (Oui)
+        :Recherche dans frmb-audit\n(via TRANS.REFERENCE);
+        if (Audit trouvé ?) then (Oui)
+          #A9D08E:Enrichir avec l'écrêtement\n(status, cappedAmount...);
+          #9BC2E6:Publier message dans\n**cbs-booked-fees**;
+        else (Non)
+          #F4B084:Envoyer en DLQ (Attente);
+          stop
+        endif
+      else (Non)
+        #9BC2E6:Mapping 1:1 direct;
+        #9BC2E6:Publier 1 message dans\n**cbs-booked-fees**;
+      endif
+    endif
+  else (Non (Opération standard))
+    :Mapping et publication vers\n**domain-transactions**;
+  endif
+
+else (Non (Mouvement P&L ou Interne\nex: CAT.ENTRY au mois N))
+  if (Est-ce une provision pour Frais d'Incident AA ?) then (Oui)
+    :Récupération de l'Arrangement ID\n(Contrat client lié);
+    :Recherche dans frmb-audit\n(via TRANS.REFERENCE);
+    if (Audit trouvé ?) then (Oui)
+      #A9D08E:Enrichir avec montant prévisionnel\net les informations de plafonnement;
+      #FFE699:Publier message dans\n**cbs-deferred-fees**\n*(Pour l'information préalable client)*;
+    else (Non)
+      #F4B084:Envoyer en DLQ (Attente);
+      stop
+    endif
+  else (Non)
+    :Ignorer (Hors périmètre Frais);
+  endif
+endif
+
+stop
+@enduml
