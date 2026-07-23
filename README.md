@@ -1,89 +1,45 @@
-@startuml
-!theme plain
-skinparam handwritten true
-skinparam defaultTextAlignment center
+Modèle de page Confluence : Architecture Générale AS IS - Îlot [Nom de l'Îlot]
+1. Raison d'être de l'Îlot (AS IS)
+Périmètre actuel : À quoi sert concrètement cet adapter aujourd'hui ? (ex: "Permet au front-end de lire les comptes du CBS").
 
-' Style spécifique pour les diagrammes d'activité
-skinparam activity {
-    BackgroundColor #E8F8F5
-    BorderColor Black
-    DiamondBackgroundColor #FCF3CF
-    DiamondBorderColor Black
-}
+Cas d'usage métiers supportés (Use Cases) :
 
-title Logigramme TSG : Routage et Éclatement des Événements
+Exemple : Ouverture de compte simple.
 
-start
-:Nouveau mouvement comptable reçu
-Topic : **cbs-booked** (STMT.ENTRY);
+Exemple : Lecture de l'historique.
 
-if (Le TRANSACTION.CODE est-il\ndans le catalogue des Frais ?) then (Non)
-    #E8F8F5:Publier dans le topic
-    **domain-transactions**;
-    note right
-      Opérations standards
-      (Salaires, Achats CB, etc.)
-    end note
-    stop
-else (Oui (C'est un frais))
-    if (Est-ce un Frais Différé ?\n(Ex: Facture fin de mois)) then (Oui)
-        :Recherche dans **billing-details**
-        (via TRANS.REFERENCE);
-        if (Détails trouvés ?) then (Oui)
-            #B0D4F1:Éclater le mouvement global
-            en **N** événements détaillés;
-            
-            #B0D4F1:Publier **N messages** dans
-            **domain-fees**;
-            note right
-              1 événement par ligne de facture.
-              Tous partagent le même "coreLedgerRef".
-            end note
-            stop
-        else (Non)
-            #FFCCCC:Envoyer en **DLQ** (Attente);
-            note right: Désynchronisation Kafka
-            stop
-        endif
-        
-    else (Non)
-        if (Est-ce un Frais d'Incident ?\n(Ex: Rejet soumis Murcef)) then (Oui)
-            :Recherche dans **frmb-audit**
-            (via TRANS.REFERENCE);
-            if (Audit trouvé ?) then (Oui)
-                #B0D4F1:Enrichir avec l'écrêtement
-                (status, cappedAmount...);
-                
-                #B0D4F1:Publier 1 message enrichi dans
-                **domain-fees**;
-                stop
-            else (Non)
-                #FFCCCC:Envoyer en **DLQ** (Attente);
-                stop
-            endif
-            
-        else (Non (Frais simple immédiat))
-            #B0D4F1:Mapping 1:1 direct
-            (Pas besoin d'enrichissement);
-            
-            #B0D4F1:Publier 1 message dans
-            **domain-fees**;
-            note right
-              Ex: Frais de virement
-              immédiat
-            end note
-            stop
-        endif
-    endif
-endif
+2. Modèle Mental & Concepts Métiers Actuels
+Modèle de données exposé : Comment les concepts du CBS sont-ils traduits actuellement par l'adapter ? (ex: Titulaires, Comptes, Transactions).
 
-@enduml
+Règles de gestion spécifiques implémentées : (ex: Comment la différence entre Booked et Non-booked est-elle gérée aujourd'hui ? Est-ce que l'adapter fait le calcul lui-même ou redescend-il la donnée brute du CBS ?).
 
+3. Fonctionnement de l'Intégration (Existant)
+Pour chaque grand cas d'usage actuel, documenter comment l'intégration fonctionne en ce moment.
 
-===
+[Nom du Cas d'Usage, ex: Création d'un client] :
 
-Le dictionnaire de codes : La fonction CATALOGUE_CODES_FRAIS est le cœur du réacteur. TSG doit charger en mémoire (idéalement via un Global KTable ou un cache Redis) la liste officielle des TRANSACTION.CODE que la banque considère comme des frais.
+Séquence actuelle : (Diagramme montrant comment l'adapter interroge le CBS).
 
-Le point d'ancrage (transReference) : Remarquez que les fonctions fetch_from_billing_topic et fetch_from_frmb_topic utilisent toujours la référence d'origine pour retrouver la donnée d'enrichissement. C'est votre clé de jointure.
+Payload actuel : (Exemple du JSON tel qu'il est envoyé/reçu aujourd'hui).
 
-Le filet de sécurité (DLQ) : Dans un système distribué asynchrone comme Kafka, le détail billing-details pourrait arriver quelques millisecondes après le mouvement cbs-booked. L'algorithme prévoit de mettre le message en attente (Dead Letter Queue ou State Store) pour le rejouer, plutôt que de crasher ou de générer un frais vide.
+4. Grille d'Audit des Capacités Opérationnelles
+Cette section évalue les standards d'intégration de l'API. (Indiquer le mécanisme existant, ou inscrire "Non géré" / "Absent").
+
+Traçabilité & Observabilité : (Comment suit-on une requête aujourd'hui entre le consommateur, l'adapter et le CBS ? Y a-t-il un ID de corrélation ?)
+
+Idempotence : (Comment l'API gère-t-elle les doubles appels front-end actuellement ?)
+
+Gestion des Erreurs : (Les erreurs sont-elles standardisées ? L'adapter renvoie-t-il des codes techniques du CBS ou des messages compréhensibles ?)
+
+Comportement Asynchrone : (L'adapter publie-t-il des événements métier ? Y a-t-il des Webhooks ?)
+
+Protection du CBS (Rate Limiting / Caching) : (Qu'est-ce qui empêche le front-end de surcharger le CBS via l'adapter aujourd'hui ?)
+
+Bouchonnage (Sandbox) : (Comment les consommateurs testent-ils les cas d'erreur rares en UAT ?)
+
+5. Références Techniques
+Lien vers la spécification OpenAPI / Swagger actuelle générée par le code.
+
+URLs des environnements actuels (DEV, UAT, PROD).
+
+Mécanisme d'authentification utilisé.
