@@ -1,43 +1,325 @@
-: Il n'y a pas un seul "ID de transaction", il y a une chaîne d'identifiants.
+---
+title: "Spec — Pipeline architecture-docs → Confluence"
+doc_type: spec
+domain: tooling
+status: draft
+owner: paterne
+labels: [tooling, docs-as-code, confluence, mermaid]
+---
 
-Dans Transact, l'identifiant change de forme selon la couche logicielle où vous vous trouvez (l'Initiation, le Moteur, ou la Comptabilité). Voici la carte d'identité exacte des clés primaires (les @ID ou RECID) pour chaque étape de votre flux.
+# Spec — Génération de la documentation d'architecture vers Confluence
 
-1. La clé d'Initiation (Le déclencheur métier)
-C'est la clé primaire de l'application source. C'est l'ID que le conseiller voit sur son écran ou que l'API renvoie.
+## 1. Contexte et besoin
 
-Format : Un préfixe de 2 lettres (identifiant le module) + une date julienne (souvent YYDDD) + un numéro de séquence.
+Les architectes IT rédigent la **documentation d'architecture générale** dans un
+repo GitLab dédié `architecture-docs/`. Cette documentation décrit, pour chaque
+domaine identifié :
 
-Exemples :
+- un **overview boîte-noire** mettant en exergue les flux entrants/sortants du domaine ;
+- une **vue composants détaillée** avec les flux internes ;
+- le détail de chaque **use case** (BPMN, diagrammes de séquence, C4).
 
-FT2419512345 (Pour un FUNDS.TRANSFER)
+La documentation a **deux publics** :
 
-PO2419598765 (Pour un Payment Order du Payment Hub)
+1. **Humains** — via des pages **Confluence** générées automatiquement (forte
+   culture Confluence dans l'entreprise : middle office, relation client, PM, dev).
+2. **Agents IA / LLM** — qui lisent directement les sources dans le repo git.
 
-CHG241950001 (Pour une AC.CHARGE.REQUEST)
+### Objectif
 
-2. La clé d'Activité (Le moteur AA)
-C'est la clé primaire de la table AA.ARRANGEMENT.ACTIVITY. C'est le fameux événement d'exécution.
+Mettre en place une chaîne **docs-as-code** où :
 
-Format : Le préfixe AAA + la date julienne (YYDDD) + un numéro de séquence unique.
+- la **source de vérité est le texte versionné dans git** (Markdown + mermaid + DSL Structurizr) ;
+- un **orchestrateur** transforme automatiquement ces sources en pages Confluence
+  à chaque merge sur `main` ;
+- les diagrammes sont **générés** (jamais dessinés à la main dans un format binaire).
 
-Exemple : AAA2419509876543
+## 2. Principes directeurs
 
-Note métier : Si l'opération vient d'un virement (FT), Transact crée ce AAA en coulisse (le Shadow). Si c'est un prélèvement d'agios mensuel, la transaction naît directement sous la forme d'un AAA.
+| # | Principe | Conséquence |
+|---|----------|-------------|
+| P1 | **Source unique et textuelle** | Le mermaid / la DSL Structurizr sont la seule vérité. Les SVG et Excalidraw en sont dérivés. |
+| P2 | **Artefacts de build jetables** | Excalidraw et SVG sont générés à chaque build, jamais édités à la main (cf. §4). |
+| P3 | **Git = source de vérité du corps** | Le corps des pages Confluence appartient à git. |
+| P4 | **Confluence = couche de collaboration** | Les commentaires appartiennent à Confluence et ne sont jamais écrasés (cf. §6). |
+| P5 | **Double public** | Tout doit rester lisible par un LLM : Markdown + mermaid, pas de sens caché uniquement dans l'image. |
+| P6 | **Déterminisme** | Même source → même SVG. Builds reproductibles, diffs propres. |
 
-3. La clé Comptable (Le Ledger)
-C'est la clé primaire de la table STMT.ENTRY. C'est la ligne comptable physique.
+## 3. Format de la documentation
 
-Format : Une très longue séquence numérique pure (souvent l'ID de la transaction d'origine hachée ou séquentielle, suivie d'un suffixe pour indiquer le numéro de la patte comptable).
+- **Markdown** (CommonMark) — un fichier `.md` par page Confluence.
+- **Frontmatter YAML** en tête de chaque fichier (cf. §7) portant les métadonnées
+  machine (identité Confluence, hiérarchie, état de publication).
+- Les **diagrammes mermaid** sont écrits en blocs ` ```mermaid ` directement dans
+  le `.md`, OU injectés par le build depuis un export Structurizr.
+- La **hiérarchie** est portée par l'arborescence Confluence native (parent/enfant),
+  pas par des includes (cf. §8).
 
-Exemple : 172948503928475.0001 (Le .0001 indique que c'est la première ligne générée par le mouvement).
+> AsciiDoc a été écarté : ses seuls avantages structurels (includes, tables riches,
+> attributs) sont soit neutralisés par le pipeline, soit couverts autrement, et le
+> Markdown est nettement mieux lu par les LLM.
 
-Le champ magique : TRANS.REFERENCE
-Pour que vous ne soyez pas perdu entre ces trois niveaux, Temenos utilise un champ "colle" dans la table STMT.ENTRY : le champ TRANS.REFERENCE.
+## 4. Workflow de génération des diagrammes (SVG)
 
-C'est ce champ-là que l'on appelle vulgairement "l'ID de la transaction" quand on fait de la Data.
+### 4.1 Les deux sources de diagrammes
 
-Voici ce que Transact inscrit dans le champ TRANS.REFERENCE du STMT.ENTRY :
+1. **Structurizr (DSL)** — un modèle unique, plusieurs vues (contexte, container,
+   composant). Le build **exporte** ces vues en mermaid.
+2. **Mermaid écrit à la main** — pour les diagrammes hors modèle C4 (BPMN, séquences,
+   schémas ad hoc), écrit directement dans le `.md`.
 
-Si l'origine est un module historique (ex: Virement), il stocke l'ID d'origine : FT2419512345. (Il masque le AAA fantôme pour que le client final voie bien la référence du virement).
+### 4.2 La chaîne de rendu
 
-Si l'origine est 100% native AA (ex: prélèvement de la carte bancaire), il stocke l'ID de l'activité : AAA2419509876543.
+```
+Structurizr DSL ─┐
+                 ├─► mermaid ─► excalidraw ─► svg
+mermaid (main) ──┘   (SOURCE)   (jetable)     (jetable)
+```
+
+- **mermaid** = source de vérité du diagramme (texte, versionné, lisible LLM).
+- **excalidraw** = **artefact intermédiaire jetable**, généré à partir du mermaid,
+  jamais édité à la main. Il apporte le rendu « hand-drawn ».
+- **svg** = artefact final jetable, attaché à la page Confluence.
+
+### 4.3 Excalidraw : jetable et non modifiable (règle stricte)
+
+Excalidraw est traité **comme du code généré** (analogie : classes générées depuis
+un contrat OpenAPI). Il est **toujours régénéré depuis le mermaid** et **jamais
+retouché**. Toute évolution sémantique **ou** cosmétique passe par le mermaid / la DSL.
+
+**Enforcement obligatoire** (au choix, l'un des deux) :
+
+- **Option A — gitignore** : `excalidraw` et `svg` ne sont **jamais commités**,
+  ils vivent dans un dossier de build (`.gen/`). C'est le mode recommandé.
+- **Option B — commité + garde CI** : commités avec un en-tête `DO NOT EDIT`,
+  et un job CI qui **régénère et échoue en cas de divergence** avec le mermaid.
+
+Sans l'un des deux, l'invariant « jetable » repose sur la seule discipline humaine
+et finira par être violé.
+
+### 4.4 Contrainte de déterminisme
+
+Le convertisseur `mermaid → excalidraw` doit être **déterministe** (pas de layout
+aléatoire). À valider tôt : un layout non déterministe rendrait les diffs et les
+artefacts bruités.
+
+## 5. Workflow de publication Confluence
+
+À chaque **merge sur `main`**, la CI GitLab déclenche :
+
+1. **Build des diagrammes** : Structurizr/mermaid → SVG (§4).
+2. **Orchestrateur** : pour chaque `.md`, décider et publier (§9).
+
+Identité des pages :
+
+- `wiki_page_id` **nul** → l'orchestrateur **crée** une nouvelle page, puis
+  **réécrit l'id** dans le frontmatter et **commit** (commit bot).
+- `wiki_page_id` **non nul** → l'orchestrateur **met à jour** la page existante,
+  après contrôle de dérive et de hash.
+
+## 6. Gestion des commentaires et édits directs Confluence
+
+- **Commentaires footer** : stockés séparément du corps → **survivent** à chaque
+  republication. Aucune action.
+- **Commentaires inline** : ancrés sur du texte ; peuvent se déancrer si le texte
+  change. Perte marginale et non destructive. Privilégier le footer culturellement.
+- **Édits directs du corps** : interdits en pratique :
+  - **Permissions** : édition du corps réservée au compte de service (bot),
+    **commentaires ouverts à tous**.
+  - **Bandeau généré** en tête de page : « Page générée depuis GitLab, toute
+    modification ici sera écrasée. Proposez vos changements via merge request. »
+  - **Détection de dérive** : jamais de PUT en aveugle (cf. §9).
+
+> La synchronisation bidirectionnelle (Confluence → git) est **hors périmètre** :
+> conversion inverse lossy. Les commentaires sont des *signaux*, l'archi les
+> reporte manuellement dans le markdown puis republie.
+
+## 7. Schéma de frontmatter
+
+Trois familles de champs : écrits par l'**archi** (source), écrits par le **moteur**
+(bot), ou **dérivés** par convention.
+
+```yaml
+---
+# ── Écrits par l'ARCHI (source de vérité, à la main) ──
+title: "Account — Îlot Référentiel Client"
+doc_type: components            # overview | components | usecase | adr | spec
+domain: account
+status: draft                   # draft | review | published
+owner: paterne
+labels: [account, referentiel, architecture]
+parent: ./account.md            # page parente : RÉFÉRENCE FICHIER, pas un id
+
+# ── Écrits par le MOTEUR (bot, réécrits au publish) ──
+wiki_page_id:                   # null → créer ; rempli après création
+wiki_space: ARCHI               # peut être un défaut repo-level
+wiki_parent_id:                 # résolu depuis `parent`
+last_published_version:         # version Confluence attendue (détection dérive)
+content_hash:                   # hash du body rendu (skip si inchangé)
+last_published_at:              # horodatage dernière publication
+---
+```
+
+| Champ | Écrit par | Rôle |
+|-------|-----------|------|
+| `title` | archi | Titre de la page Confluence |
+| `doc_type` | archi | Pilote template/validation |
+| `domain` | archi | Rattachement domaine + label |
+| `status` | archi | Cycle de vie ; le moteur peut refuser de publier un `draft` |
+| `owner` | archi | Traçabilité (gouvernance) |
+| `labels` | archi | Labels Confluence |
+| `parent` | archi | Référence **fichier** vers la page parente |
+| `wiki_page_id` | moteur | `null` → create ; rempli et recommité après |
+| `wiki_space` | moteur/défaut | Space cible |
+| `wiki_parent_id` | moteur | Résolu depuis `parent` |
+| `last_published_version` | moteur | Détection de dérive |
+| `content_hash` | moteur | Skip si inchangé (pas de notif watchers) |
+| `last_published_at` | moteur | Audit / debug |
+
+**Règles d'or** :
+- L'archi ne touche jamais aux champs moteur ; le moteur ne touche jamais aux champs archi.
+- Jamais d'`id` numérique écrit à la main : on manipule des **fichiers**, le moteur résout vers des **ids**.
+
+## 8. Hiérarchie et liens
+
+- **Hiérarchie** = arborescence Confluence native. `parent: ./account.md` →
+  le moteur résout `wiki_parent_id`. Pas d'includes.
+- **Liens** = chemins relatifs dans le `.md` (`[Îlot Paiement](./ilot-paiement.md)`),
+  réécrits par le moteur en liens internes Confluence (`ac:link` vers le `wiki_page_id`).
+  → fonctionnent dans GitLab, suivables par un LLM, valides dans Confluence.
+- **Navigation auto** (option) : macro « Children Display » injectée dans la page parente.
+
+## 9. Ce que doit faire l'orchestrateur
+
+### 9.1 Responsabilités
+
+1. Parser le **frontmatter** (`python-frontmatter`).
+2. Rendre le **corps Markdown → storage format** Confluence (lib `md2cf` / équivalent).
+3. **Réécrire les liens** relatifs `.md` → `ac:link`, via la map fichier→`wiki_page_id`.
+4. **Attacher les SVG** référencés (`ac:image` d'attachments).
+5. **Résoudre `parent`** → `wiki_parent_id`.
+6. Exécuter le **moteur de décision** (create / update / skip / alert).
+7. **Write-back** du `wiki_page_id` + commit bot (avec `[skip ci]`).
+8. Appliquer **labels** et **bandeau généré**.
+
+### 9.2 Moteur de décision (par fichier)
+
+```
+POUR chaque fichier .md :
+    SI status == draft ET politique = "ne pas publier les drafts" :
+        SKIP
+    rendu = markdown_to_storage(corps)
+    hash  = sha256(rendu)
+
+    SI wiki_page_id est nul :
+        page = confluence.create(space, parent_id, title, rendu)
+        frontmatter.wiki_page_id = page.id
+        frontmatter.last_published_version = page.version   # = 1
+        frontmatter.content_hash = hash
+        commit_writeback(fichier)          # [skip ci]
+    SINON :
+        distant = confluence.get(wiki_page_id)
+
+        SI distant.version > last_published_version :
+            ALERT("dérive : édition manuelle détectée")   # NE PAS écraser
+            CONTINUE
+
+        SI hash == content_hash :
+            SKIP   # inchangé : pas de bump de version, pas de notif
+        SINON :
+            confluence.update(wiki_page_id, rendu,
+                              version = distant.version + 1)
+            frontmatter.last_published_version = distant.version + 1
+            frontmatter.content_hash = hash
+            commit_writeback(fichier)
+```
+
+### 9.3 Stack recommandée
+
+- **Langage** : Python.
+- **Libs** : `python-frontmatter` (métadonnées), `atlassian-python-api` ou `md2cf`
+  (REST + conversion), `hashlib` (content_hash).
+- **Exécution** : job GitLab CI sur `main`, compte de service Confluence (token).
+
+## 10. Hors périmètre (non-goals)
+
+- Synchronisation bidirectionnelle Confluence → git.
+- Édition manuelle des diagrammes (Excalidraw) ou des SVG.
+- Rendu mermaid côté Confluence (les SVG sont pré-générés et attachés).
+- Import one-shot Markdown natif de Confluence (non idempotent).
+
+## 11. Diagramme du workflow complet
+
+### 11.1 Vue d'ensemble (de la source à Confluence)
+
+```mermaid
+flowchart TD
+    subgraph SRC["Sources versionnées (git — source de vérité)"]
+        DSL["Structurizr DSL<br/>(modèle C4)"]
+        MMD["Blocs mermaid<br/>écrits à la main (.md)"]
+        MD["Fichiers .md<br/>+ frontmatter YAML"]
+    end
+
+    subgraph BUILD["Build diagrammes (.gen/ — jetable)"]
+        EXP["Export vues<br/>Structurizr → mermaid"]
+        EXC["mermaid → excalidraw<br/>(jetable, non édité)"]
+        SVG["excalidraw → SVG<br/>(jetable)"]
+    end
+
+    subgraph ORCH["Orchestrateur Python (CI GitLab sur main)"]
+        PARSE["Parse frontmatter"]
+        REND["Markdown → storage format"]
+        LINK["Réécriture liens .md → ac:link"]
+        ATT["Attache SVG (ac:image)"]
+        DEC{"Moteur de décision"}
+    end
+
+    subgraph CONF["Confluence"]
+        NEW["Créer page<br/>+ write-back wiki_page_id"]
+        UPD["Mettre à jour page<br/>version + 1"]
+        SKIP["Skip<br/>(hash inchangé)"]
+        ALERT["Alerte dérive<br/>(pas d'écrasement)"]
+    end
+
+    DSL --> EXP --> EXC
+    MMD --> EXC
+    EXC --> SVG
+    SVG --> ATT
+
+    MD --> PARSE --> REND --> LINK --> ATT --> DEC
+    DEC -->|"wiki_page_id nul"| NEW
+    DEC -->|"non nul + hash différent"| UPD
+    DEC -->|"non nul + hash identique"| SKIP
+    DEC -->|"version distante > attendue"| ALERT
+    NEW -.->|commit bot| MD
+    UPD -.->|commit bot| MD
+```
+
+### 11.2 Détail du moteur de décision
+
+```mermaid
+flowchart TD
+    START(["Fichier .md"]) --> DRAFT{"status == draft ?"}
+    DRAFT -->|oui| S0["SKIP"]
+    DRAFT -->|non| HASH["rendu = MD→storage<br/>hash = sha256(rendu)"]
+    HASH --> ID{"wiki_page_id nul ?"}
+
+    ID -->|oui| CREATE["Créer la page"]
+    CREATE --> WB1["Write-back : id, version=1, hash<br/>commit [skip ci]"]
+
+    ID -->|non| GET["GET page distante"]
+    GET --> DRIFT{"version distante ><br/>last_published_version ?"}
+    DRIFT -->|oui| ALERT["ALERTE dérive<br/>ne PAS écraser"]
+    DRIFT -->|non| CMP{"hash == content_hash ?"}
+    CMP -->|oui| S1["SKIP (inchangé)"]
+    CMP -->|non| UPDATE["UPDATE version+1"]
+    UPDATE --> WB2["Write-back : version, hash<br/>commit [skip ci]"]
+```
+
+## 12. Prochaines étapes
+
+1. Spike 1 jour : publier une page en dur (create → update → attach SVG) avec
+   `atlassian-python-api` ; valider auth et cycle de version.
+2. Valider le déterminisme du convertisseur `mermaid → excalidraw`.
+3. Définir l'arborescence `architecture-docs/` (domaines + îlots).
+4. Implémenter le moteur de décision (§9.2).
